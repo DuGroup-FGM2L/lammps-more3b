@@ -73,6 +73,7 @@ PairSW3B::~PairSW3B()
     memory->destroy(setflag);
     memory->destroy(cutsq);
     memory->destroy(neighshort);
+    memory->destroy(cutmax);
   }
 }
 
@@ -355,11 +356,11 @@ void PairSW3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].lambda < 0   || params[nparams].epsilon      ||
+      if (params[nparams].lambda < 0   || params[nparams].epsilon < 0  ||
           params[nparams].gamma_ij < 0 || params[nparams].gamma_ik < 0 ||
           params[nparams].sigma_ij < 0 || params[nparams].sigma_ik < 0 ||
           params[nparams].a_ij < 0     || params[nparams].a_ik < 0     )
-        error->one(FLERR,"Illegal Stillinger-Weber parameter");
+        error->one(FLERR,"Illegal three-body Stillinger-Weber parameter");
 
 
 
@@ -387,18 +388,7 @@ void PairSW3B::setup_params()
 
   if (use_symmetry) utils::logmesg(lmp, "  Symmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n");
 
-  memory->destroy(cutmax);
-  memory->create(cutmax, nelements, nelements, "pair:cutmax");
-  memset(cutmax, 0, sizeof(int) * nelements * nelements);
 
-  double cut_ij, cut_ik;
-
-  for (m = 0; m < nparams; m++) {
-    cut_ij = params[m].a_ij * params[m].sigma_ij;
-    cut_ik = params[m].a_ik * params[m].sigma_ik;
-    if (cut_ij > cutmax[params[m].ielement][params[m].jelement]) cutmax[params[m].ielement][params[m].jelement] = cut_ij;
-    if (cut_ik > cutmax[params[m].ielement][params[m].kelement]) cutmax[params[m].ielement][params[m].kelement] = cut_ik;
-  }
 
   memory->destroy(elem3param);
   memory->create(elem3param, nelements, nelements, nelements, "pair:elem3param");
@@ -469,7 +459,28 @@ void PairSW3B::setup_params()
 
 
   //Record maximum needed cutoff distance for neighborlist builds
-  
+  memory->create(cutmax, nelements, nelements, "pair:cutmax");
+  double cut;
+  for (i = 0; i < nelements; i++){
+    for (j = 0; j < nelements; j++){
+      cutmax[i][j] = 0;
+
+      //For each pair in cutmax scan all parameter sets
+      for (m = 0; m < nparams; m++) {
+        if (i == params[m].ielement && j == params[m].jelement ||
+            i == params[m].jelement && j == params[m].ielement){
+            cut = params[m].a_ij * params[m].sigma_ij;
+            if (cut > cutmax[i][j]) cutmax[i][j] = cut;
+        }
+        if (i == params[m].ielement && j == params[m].kelement ||
+            i == params[m].kelement && j == params[m].ielement){
+            cut = params[m].a_ik * params[m].sigma_ik;
+            if (cut > cutmax[i][j]) cutmax[i][j] = cut;
+        }
+      }
+    }
+  }
+
 
 }
 
@@ -505,6 +516,7 @@ void PairSW3B::threebody(Param *param, double rsq_ij, double rsq_ik,
   double exp1   = exp(gamma_ij * sigma_ij / (r_ij - a_ij * sigma_ij));
   double exp2   = exp(gamma_ik * sigma_ik / (r_ik - a_ik * sigma_ik));
   double cosdif = costheta - costheta0;
+
 
   if (param->sigma_ij * param->a_ij <= r_ij) U = 0;
   else if (param->sigma_ik * param->a_ik <= r_ik) U = 0;
