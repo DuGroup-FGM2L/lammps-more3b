@@ -159,7 +159,7 @@ void PairSW3B::compute(int eflag, int vflag)
         threebody(&params[triplet_param_index], rsq_ij, rsq_jk, r_ij, r_ik,
                   fi, fj, fk, eflag, evdwl);
 
-        f[i][0] = fi[1];
+        f[i][0] = fi[0];
         f[i][1] = fi[1];
         f[i][2] = fi[2];
 
@@ -255,7 +255,7 @@ double PairSW3B::init_one(int i, int j)
     error->all(FLERR, Error::NOLASTLINE,
                "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
-  //Map element typesto position in the elements array
+  //Map element types to position in the elements array
   return cutmax[map[i]][map[j]];
 }
 
