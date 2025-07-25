@@ -13,11 +13,10 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Aidan Thompson (SNL)
-   Optimizations for two-body only: Jackson Elowitt (Univ. of Utah)
+   Contributing author: Vasilii Maksimov (University of North Texas)
 ------------------------------------------------------------------------- */
 
-#include "pair_sw_3b.h"
+#include "pair_trunc_3b.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -329,11 +328,11 @@ void PairTrunc3B::read_file(char *file)
       
       //If "UNITS:" keword found in file multiply by factor
       if (unit_convert) {
-        params[nparams].epsilon *= conversion_factor;
+        params[nparams].k *= conversion_factor;
       }
 
       //Check physicality of values
-      if (params[nparams].k < 0 || params[nparams].rho < 0  ||)
+      if (params[nparams].k < 0 || params[nparams].rho < 0)
         error->one(FLERR,"Illegal trunc/3b parameter");
 
       nparams++;
@@ -439,7 +438,7 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
 
   //Recuring parts
   double rho8 = pow(rho, 8);
-  double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8)
+  double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8);
   double cosdif = costheta - costheta0;
 
   U = 0.5 * k * cosdif * cosdif * expon;
@@ -449,9 +448,9 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
     U_rik = 0;
     U_theta = 0;
   } else {
-    U_rij   = -U * 8 * pow(r_ij, 7) / rho8
+    U_rij   = -U * 8 * pow(r_ij, 7) / rho8;
 
-    U_rik   = -U * 8 * pos(r_ik, 7) / rho8
+    U_rik   = -U * 8 * pow(r_ik, 7) / rho8;
 
     U_theta = k * cosdif * expon;
   }

@@ -36,6 +36,7 @@ class PairTrunc3B : public Pair {
   static constexpr int LINE_PARAMS = 6;
 
   struct Param {
+    int ielement, jelement, kelement;
     double k, costheta0, rho;
   };
 
