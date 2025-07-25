@@ -1,0 +1,42 @@
+#----------------------------------------------INITIALIZATION------------------------------
+
+units               real
+atom_style          charge
+boundary            p p p
+comm_modify         mode single vel yes
+neighbor            2.0 bin
+neigh_modify        every 1 delay 0
+
+#---------------------------------------------SYSTEM DEFINITION----------------------------
+
+read_data           data.sw3b
+
+mass                1 28.085 #Si
+mass                2  1.008 #H
+mass                3 15.999 #O
+
+pair_style          sw/3b
+
+pair_coeff          * * SiOH.sw3b Si H O
+
+#-----------------------------------------------VISUALIZATION------------------------------
+
+thermo              10
+thermo_style        custom step temp etotal pe vol density press
+thermo_modify       flush yes
+
+
+#----------------------------------------------------RUN-----------------------------------
+
+timestep            0.1
+
+variable            temp equal 300
+velocity            all create ${temp} 123456
+
+minimize            1.0e-8 1.0e-8 100000 10000000
+
+fix                 run1 all nvt temp ${temp} ${temp} $(100.0 * dt)
+run                 1000
+unfix               run1
+
+write_data          result.data
