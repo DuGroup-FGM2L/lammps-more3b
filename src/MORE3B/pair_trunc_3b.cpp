@@ -38,7 +38,7 @@ static constexpr int DELTA = 4;
 
 /* ---------------------------------------------------------------------- */
 
-PairSW3B::PairSW3B(LAMMPS *lmp) : Pair(lmp)
+PairTrunc3B::PairTrunc3B(LAMMPS *lmp) : Pair(lmp)
 {
   single_enable = 0; //No support for pair_write
   restartinfo = 0;   //Info on potentials does not get stored in restart files
@@ -49,7 +49,6 @@ PairSW3B::PairSW3B(LAMMPS *lmp) : Pair(lmp)
   //Check header of the file for line with "UNITS:" keyword
   unit_convert_flag = utils::get_supported_conversions(utils::ENERGY);
 
-  use_symmetry = 1;
   params_mapped = 0;
 
   params = nullptr;
@@ -62,7 +61,7 @@ PairSW3B::PairSW3B(LAMMPS *lmp) : Pair(lmp)
    check if allocated, since class can be destructed when incomplete
 ------------------------------------------------------------------------- */
 
-PairSW3B::~PairSW3B()
+PairTrunc3B::~PairTrunc3B()
 {
   if (copymode) return;
 
@@ -73,13 +72,12 @@ PairSW3B::~PairSW3B()
     memory->destroy(setflag);
     memory->destroy(cutsq);
     memory->destroy(neighshort);
-    memory->destroy(cutmax);
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairSW3B::compute(int eflag, int vflag)
+void PairTrunc3B::compute(int eflag, int vflag)
 {
   int i, j, k, ii, jj, kk, inum, jnum;
   int itype, jtype, ktype, triplet_param_index;
@@ -127,7 +125,7 @@ void PairSW3B::compute(int eflag, int vflag)
             (x[j][2] - x[i][2]) * (x[j][2] - x[i][2]);
 
       //Build list of close neighbors to i to iterate over all i-j-k triplets
-      if (rsq >= cutmax[itype][jtype] * cutmax[itype][jtype]) {
+      if (rsq >= cutmax * cutmax) {
         continue;
       } else {
         neighshort[numshort++] = j;
@@ -159,7 +157,7 @@ void PairSW3B::compute(int eflag, int vflag)
         threebody(&params[triplet_param_index], rsq_ij, rsq_jk, r_ij, r_ik,
                   fi, fj, fk, eflag, evdwl);
 
-        f[i][0] = fi[1];
+        f[i][0] = fi[0];
         f[i][1] = fi[1];
         f[i][2] = fi[2];
 
@@ -181,7 +179,7 @@ void PairSW3B::compute(int eflag, int vflag)
 
 /* ---------------------------------------------------------------------- */
 
-void PairSW3B::allocate()
+void PairTrunc3B::allocate()
 {
   allocated = 1;
   int np1 = atom->ntypes + 1;
@@ -196,24 +194,19 @@ void PairSW3B::allocate()
    global settings
 ------------------------------------------------------------------------- */
 
-void PairSW3B::settings(int narg, char ** arg)
+void PairTrunc3B::settings(int narg, char ** arg)
 {
-  // process optional keywords
-  int iarg = 0;
-  while (iarg < narg) {
-    if (strcmp(arg[iarg], "sym") == 0) {
-      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "pair_style sw/asym", error);
-      use_symmetry = utils::logical(FLERR, arg[iarg + 1], false, lmp);
-      iarg += 2;
-    } else error->all(FLERR, "Illegal pair_style sw keyword: {}", arg[iarg]);
+  if (narg > 1) {
+    error->all(FLERR, "Pair style trunc/3b received {} arguments when only 1 (cutoff)", narg);
   }
+  cutmax = utils::numeric(FLERR, arg[0], false, lmp);
 }
 
 /* ----------------------------------------------------------------------
    set coeffs for one or more type pairs
 ------------------------------------------------------------------------- */
 
-void PairSW3B::coeff(int narg, char **arg)
+void PairTrunc3B::coeff(int narg, char **arg)
 {
   if (!allocated) allocate();
 
@@ -233,12 +226,12 @@ void PairSW3B::coeff(int narg, char **arg)
    init specific to this pair style
 ------------------------------------------------------------------------- */
 
-void PairSW3B::init_style()
+void PairTrunc3B::init_style()
 {
   if (atom->tag_enable == 0)
-    error->all(FLERR,"Pair style Stillinger-Weber/3b requires atom IDs");
+    error->all(FLERR,"Pair style trunc/3b requires atom IDs");
   if (force->newton_pair == 0)
-    error->all(FLERR,"Pair style Stillinger-Weber/3b requires newton pair on");
+    error->all(FLERR,"Pair style trunc/3b requires newton pair on");
 
   // need a full neighbor list for full threebody calculation
 
@@ -249,20 +242,19 @@ void PairSW3B::init_style()
    init for one type pair i,j and corresponding j,i
 ------------------------------------------------------------------------- */
 
-double PairSW3B::init_one(int i, int j)
+double PairTrunc3B::init_one(int i, int j)
 {
   if (setflag[i][j] == 0)
     error->all(FLERR, Error::NOLASTLINE,
                "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
-  //Map element types to position in the elements array
-  return cutmax[map[i]][map[j]];
+  return cutmax;
 }
 
 
 /* ---------------------------------------------------------------------- */
 
-void PairSW3B::read_file(char *file)
+void PairTrunc3B::read_file(char *file)
 {
   memory->sfree(params);
   params = nullptr;
@@ -281,7 +273,7 @@ void PairSW3B::read_file(char *file)
     double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
                                                             unit_convert);
 
-    while ((line = reader.next_line(MIN_LINE_PARAMS))) {
+    while ((line = reader.next_line(LINE_PARAMS))) {
       try {
         words_in_line = utils::count_words(line);
         ValueTokenizer values(line);
@@ -326,24 +318,9 @@ void PairSW3B::read_file(char *file)
         params[nparams].kelement = kelement;
 
         //Common parameters
-        params[nparams].lambda   = values.next_double();
-        params[nparams].epsilon  = values.next_double();
-        params[nparams].costheta = values.next_double();
-
-        //Pair parameters
-        params[nparams].gamma_ij = values.next_double();
-        params[nparams].sigma_ij = values.next_double();
-        params[nparams].a_ij     = values.next_double();
-
-        if (words_in_line == MAX_LINE_PARAMS){
-          params[nparams].gamma_ik = values.next_double();
-          params[nparams].sigma_ik = values.next_double();
-          params[nparams].a_ik     = values.next_double();
-        } else {
-          params[nparams].gamma_ik = params[nparams].gamma_ij;
-          params[nparams].sigma_ik = params[nparams].sigma_ij;
-          params[nparams].a_ik     = params[nparams].a_ik;
-        }
+        params[nparams].k         = values.next_double();
+        params[nparams].costheta0 = values.next_double();
+        params[nparams].rho       = values.next_double();
 
 
       } catch (TokenizerException &e) {
@@ -356,13 +333,8 @@ void PairSW3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].lambda < 0   || params[nparams].epsilon < 0  ||
-          params[nparams].gamma_ij < 0 || params[nparams].gamma_ik < 0 ||
-          params[nparams].sigma_ij < 0 || params[nparams].sigma_ik < 0 ||
-          params[nparams].a_ij < 0     || params[nparams].a_ik < 0     )
-        error->one(FLERR,"Illegal three-body Stillinger-Weber parameter");
-
-
+      if (params[nparams].k < 0 || params[nparams].rho < 0  ||)
+        error->one(FLERR,"Illegal trunc/3b parameter");
 
       nparams++;
     }
@@ -380,15 +352,11 @@ void PairSW3B::read_file(char *file)
 
 /* ---------------------------------------------------------------------- */
 
-void PairSW3B::setup_params()
+void PairTrunc3B::setup_params()
 {
-  int i,j,k,m,n;
+  int i, j, k, m, n;
 
   // set elem3param for all triplet combinations
-
-  if (use_symmetry) utils::logmesg(lmp, "  Symmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n");
-
-
 
   memory->destroy(elem3param);
   memory->create(elem3param, nelements, nelements, nelements, "pair:elem3param");
@@ -402,17 +370,13 @@ void PairSW3B::setup_params()
 
           if (i == params[m].ielement && j == params[m].jelement &&
               k == params[m].kelement ||
-              (use_symmetry && i == params[m].ielement && k == params[m].jelement &&
-              j == params[m].kelement)) {
+              i == params[m].ielement && k == params[m].jelement &&
+              j == params[m].kelement) {
 
             if (n >= 0) error->all(FLERR, "Potential file has a duplicate entry for: {} {} {}", elements[i], elements[j], elements[k]);
 
             if (n >= 0){
-              if (use_symmetry && params[n].jelement == k && params[n].kelement == j) {
-                utils::logmesg(lmp, "  Symmetric entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
-              } else {
-                utils::logmesg(lmp, "  Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
-              }
+              utils::logmesg(lmp, "  Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
             } else {
               n = m;
             }
@@ -431,62 +395,28 @@ void PairSW3B::setup_params()
 
           utils::logmesg(lmp, "  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
           
-          params[nparams].ielement = i;
-          params[nparams].jelement = j;
-          params[nparams].kelement = k;
+          params[nparams].ielement  = i;
+          params[nparams].jelement  = j;
+          params[nparams].kelement  = k;
 
-          params[nparams].lambda   = 0;
-          params[nparams].epsilon  = 0;
-          params[nparams].costheta = 0;
-
-          params[nparams].gamma_ij = 0;
-          params[nparams].sigma_ij = 0;
-          params[nparams].a_ij     = 0;
-
-          params[nparams].gamma_ik = 0;
-          params[nparams].sigma_ik = 0;
-          params[nparams].a_ik     = 0;
+          params[nparams].k         = 0;
+          params[nparams].costheta0 = 0;
+          params[nparams].rho       = 0;
           
           n = nparams;
           nparams++;
 
         }
         elem3param[i][j][k] = n;
-        if (use_symmetry) elem3param[i][k][j] = n;
+        elem3param[i][k][j] = n;
       }
     }
   }
-
-
-  //Record maximum needed cutoff distance for neighborlist builds
-  memory->create(cutmax, nelements, nelements, "pair:cutmax");
-  double cut;
-  for (i = 0; i < nelements; i++){
-    for (j = 0; j < nelements; j++){
-      cutmax[i][j] = 0;
-
-      //For each pair in cutmax scan all parameter sets
-      for (m = 0; m < nparams; m++) {
-        if (i == params[m].ielement && j == params[m].jelement ||
-            i == params[m].jelement && j == params[m].ielement){
-            cut = params[m].a_ij * params[m].sigma_ij;
-            if (cut > cutmax[i][j]) cutmax[i][j] = cut;
-        }
-        if (i == params[m].ielement && j == params[m].kelement ||
-            i == params[m].kelement && j == params[m].ielement){
-            cut = params[m].a_ik * params[m].sigma_ik;
-            if (cut > cutmax[i][j]) cutmax[i][j] = cut;
-        }
-      }
-    }
-  }
-
-
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairSW3B::threebody(Param *param, double rsq_ij, double rsq_ik,
+void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
                        double *vr_ij, double *vr_ik,
                        double *fi, double *fj, double *fk, int eflag, double &eng)
 {
@@ -500,40 +430,30 @@ void PairSW3B::threebody(Param *param, double rsq_ij, double rsq_ik,
   double r_ik = sqrt(rsq_ik); //Distance between atoms i and k
 
   //Parameters of the triplet
-  double lambda    = param->lambda;
-  double epsilon   = param->epsilon;
-  double costheta0 = param->costheta;
-  double gamma_ij  = param->gamma_ij;
-  double sigma_ij  = param->sigma_ij;
-  double a_ij      = param->a_ij;
-  double gamma_ik  = param->gamma_ik;
-  double sigma_ik  = param->sigma_ik;
-  double a_ik      = param->a_ik;
+  double k = param->k;
+  double costheta0 = param->costheta0;
+  double rho = param->rho;
+
   double costheta  = (vr_ij[0] * vr_ik[0] + vr_ij[1] * vr_ik[1] + vr_ij[2] * vr_ik[2])/(r_ij * r_ik);
   double sintheta = sqrt(1 - costheta * costheta);
 
   //Recuring parts
-  double exp1   = exp(gamma_ij * sigma_ij / (r_ij - a_ij * sigma_ij));
-  double exp2   = exp(gamma_ik * sigma_ik / (r_ik - a_ik * sigma_ik));
+  double rho8 = pow(rho, 8);
+  double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8)
   double cosdif = costheta - costheta0;
 
-
-  if (param->sigma_ij * param->a_ij <= r_ij) U = 0;
-  else if (param->sigma_ik * param->a_ik <= r_ik) U = 0;
-  else U = lambda * epsilon * cosdif * cosdif * exp1 * exp2;
+  U = 0.5 * k * cosdif * cosdif * expon;
 
   if (!U){
     U_rij = 0;
     U_rik = 0;
     U_theta = 0;
   } else {
-    U_rij   = -U * gamma_ij * sigma_ij /
-              ((r_ij - a_ij * sigma_ij) * (r_ij - a_ij * sigma_ij));
+    U_rij   = -U * 8 * pow(r_ij, 7) / rho8
 
-    U_rik   = -U * gamma_ik * sigma_ik /
-              ((r_ik - a_ik * sigma_ik) * (r_ik - a_ik * sigma_ik));
+    U_rik   = -U * 8 * pos(r_ik, 7) / rho8
 
-    U_theta = -2 * sintheta * lambda * epsilon * cosdif * exp1 * exp2;
+    U_theta = k * cosdif * expon;
   }
 
   //Force per length atom j exhibits on atom i along vector from i to j
