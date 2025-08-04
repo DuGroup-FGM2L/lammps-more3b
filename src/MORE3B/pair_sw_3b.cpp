@@ -13,8 +13,7 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Aidan Thompson (SNL)
-   Optimizations for two-body only: Jackson Elowitt (Univ. of Utah)
+   Contributing author: Vasilii Maksimov (University of North Texas)
 ------------------------------------------------------------------------- */
 
 #include "pair_sw_3b.h"
@@ -28,6 +27,7 @@
 #include "neigh_list.h"
 #include "neighbor.h"
 #include "potential_file_reader.h"
+#include "domain.h"
 
 #include <cmath>
 #include <cstring>
@@ -356,10 +356,11 @@ void PairSW3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].lambda < 0   || params[nparams].epsilon < 0  ||
-          params[nparams].gamma_ij < 0 || params[nparams].gamma_ik < 0 ||
-          params[nparams].sigma_ij < 0 || params[nparams].sigma_ik < 0 ||
-          params[nparams].a_ij < 0     || params[nparams].a_ik < 0     )
+      if (params[nparams].lambda < 0    || params[nparams].epsilon < 0  ||
+          params[nparams].gamma_ij < 0  || params[nparams].gamma_ik < 0 ||
+          params[nparams].sigma_ij < 0  || params[nparams].sigma_ik < 0 ||
+          params[nparams].costheta < -1 || params[nparams].costheta > 1 ||
+          params[nparams].a_ij < 0      || params[nparams].a_ik < 0     )
         error->one(FLERR,"Illegal three-body Stillinger-Weber parameter");
 
 
@@ -457,6 +458,20 @@ void PairSW3B::setup_params()
     }
   }
 
+  double *lo;
+  double *hi;
+
+  if (domain->triclinic == 0) {
+    lo = domain->boxlo;
+    hi = domain->boxhi;
+  } else {
+    lo = domain->boxlo_lamda;
+    hi = domain->boxhi_lamda;
+  }
+
+  double xside = hi[0] - lo[0];
+  double yside = hi[1] - lo[1];
+  double zside = hi[2] - lo[2];
 
   //Record maximum needed cutoff distance for neighborlist builds
   memory->create(cutmax, nelements, nelements, "pair:cutmax");
@@ -478,6 +493,9 @@ void PairSW3B::setup_params()
             if (cut > cutmax[i][j]) cutmax[i][j] = cut;
         }
       }
+      if (cutmax[i][j] > xside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], xside);
+      if (cutmax[i][j] > yside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], yside);
+      if (cutmax[i][j] > zside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], zside);
     }
   }
 
