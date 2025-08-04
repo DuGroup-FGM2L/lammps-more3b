@@ -284,6 +284,9 @@ void PairSW3B::read_file(char *file)
     while ((line = reader.next_line(MIN_LINE_PARAMS))) {
       try {
         words_in_line = utils::count_words(line);
+        if (words_in_line != MIN_LINE_PARAMS && words_in_line != MAX_LINE_PARAMS)
+          error->one(FLERR,"Illegal number of parameters ({}), for pair_sytle sw/3b. Only {} triplets successfully read.", words_in_line, nparams);
+          
         ValueTokenizer values(line);
 
         std::string iname = values.next_string();
@@ -361,7 +364,7 @@ void PairSW3B::read_file(char *file)
           params[nparams].sigma_ij < 0  || params[nparams].sigma_ik < 0 ||
           params[nparams].costheta < -1 || params[nparams].costheta > 1 ||
           params[nparams].a_ij < 0      || params[nparams].a_ik < 0     )
-        error->one(FLERR,"Illegal three-body Stillinger-Weber parameter");
+        error->one(FLERR,"Illegal (unphysical) pair_style sw/3b parameter");
 
 
 
@@ -430,7 +433,7 @@ void PairSW3B::setup_params()
             memset(params + nparams, 0, DELTA*sizeof(Param));
           }
 
-          utils::logmesg(lmp, "  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
+          utils::logmesg(lmp, "COMMENT:  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
           
           params[nparams].ielement = i;
           params[nparams].jelement = j;
