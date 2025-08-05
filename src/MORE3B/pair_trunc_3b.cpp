@@ -195,9 +195,11 @@ void PairTrunc3B::allocate()
 
 void PairTrunc3B::settings(int narg, char ** arg)
 {
-  if (narg > 1) {
-    error->all(FLERR, "Pair style trunc/3b received {} arguments when only 1 (cutoff)", narg);
-  }
+  if (narg > 1)
+    error->all(FLERR, "Pair style trunc/3b received {} arguments when only 1 (cutoff) is required", narg);
+  if (narg == 0)
+    error->all(FLERR, "Missing a required parameter (cutoff) for pair_style trunc/3b");
+
   cutmax = utils::numeric(FLERR, arg[0], false, lmp);
 }
 
@@ -275,6 +277,10 @@ void PairTrunc3B::read_file(char *file)
     while ((line = reader.next_line(LINE_PARAMS))) {
       try {
         words_in_line = utils::count_words(line);
+
+        if (words_in_line != LINE_PARAMS)
+          error->one(FLERR,"Incorrect number of trunc/3b parameters ({}). Only {} lines read.", words_in_line, nparams);
+
         ValueTokenizer values(line);
 
         std::string iname = values.next_string();
@@ -332,7 +338,8 @@ void PairTrunc3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].k < 0 || params[nparams].rho < 0)
+      if (params[nparams].k < 0          || params[nparams].rho < 0
+          params[nparams].costheta0 < -1 || params[nparams].costheta0 > 1)
         error->one(FLERR,"Illegal trunc/3b parameter");
 
       nparams++;
