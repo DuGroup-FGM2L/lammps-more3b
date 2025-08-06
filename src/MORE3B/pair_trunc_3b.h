@@ -37,7 +37,7 @@ class PairTrunc3B : public Pair {
 
   struct Param {
     int ielement, jelement, kelement;
-    double k, costheta0, rho;
+    double k, theta0, rho;
   };
 
  protected:

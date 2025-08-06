@@ -323,9 +323,9 @@ void PairTrunc3B::read_file(char *file)
         params[nparams].kelement = kelement;
 
         //Common parameters
-        params[nparams].k         = values.next_double();
-        params[nparams].costheta0 = values.next_double();
-        params[nparams].rho       = values.next_double();
+        params[nparams].k      = values.next_double();
+        params[nparams].theta0 = values.next_double();
+        params[nparams].rho    = values.next_double();
 
 
       } catch (TokenizerException &e) {
@@ -338,8 +338,7 @@ void PairTrunc3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].k < 0          || params[nparams].rho < 0
-          params[nparams].costheta0 < -1 || params[nparams].costheta0 > 1)
+      if (params[nparams].k < 0          || params[nparams].rho < 0)
         error->one(FLERR,"Illegal trunc/3b parameter");
 
       nparams++;
@@ -405,9 +404,9 @@ void PairTrunc3B::setup_params()
           params[nparams].jelement  = j;
           params[nparams].kelement  = k;
 
-          params[nparams].k         = 0;
-          params[nparams].costheta0 = 0;
-          params[nparams].rho       = 0;
+          params[nparams].k      = 0;
+          params[nparams].theta0 = 0;
+          params[nparams].rho    = 0;
           
           n = nparams;
           nparams++;
@@ -422,6 +421,7 @@ void PairTrunc3B::setup_params()
 
 /* ---------------------------------------------------------------------- */
 
+//CORRECT FROM COS DIF TO ANGLE DIF
 void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
                        double *vr_ij, double *vr_ik,
                        double *fi, double *fj, double *fk, int eflag, double &eng)
@@ -437,18 +437,21 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
 
   //Parameters of the triplet
   double k = param->k;
-  double costheta0 = param->costheta0;
+  double theta0 = param->theta0;
   double rho = param->rho;
 
   double costheta  = (vr_ij[0] * vr_ik[0] + vr_ij[1] * vr_ik[1] + vr_ij[2] * vr_ik[2])/(r_ij * r_ik);
+  costheta = costheta < -1 ? -1 : (costheta > 1 ? 1 : costheta);
+  double theta = acos(costheta);
   double sintheta = sqrt(1 - costheta * costheta);
+  sintheta = sintheta < -1 ? -1 : (sintheta > 1 ? 1 : sintheta);
 
   //Recuring parts
   double rho8 = pow(rho, 8);
   double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8);
-  double cosdif = costheta - costheta0;
+  double angledif = theta - theta0;
 
-  U = 0.5 * k * cosdif * cosdif * expon;
+  U = 0.5 * k * angledif * angledif * expon;
 
   if (!U){
     U_rij = 0;
@@ -459,7 +462,7 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
 
     U_rik   = -U * 8 * pow(r_ik, 7) / rho8;
 
-    U_theta = k * cosdif * expon;
+    U_theta = k * angledif * expon;
   }
 
   //Force per length atom j exhibits on atom i along vector from i to j
