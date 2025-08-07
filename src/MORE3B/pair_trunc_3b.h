@@ -13,7 +13,7 @@
 
 #ifdef PAIR_CLASS
 // clang-format off
-PairStyle(trunc/3b,PairTrunc3B);
+//PairStyle(trunc/3b,PairTrunc3B);
 // clang-format on
 #else
 
@@ -33,15 +33,17 @@ class PairTrunc3B : public Pair {
   double init_one(int, int) override;
   void init_style() override;
 
-  static constexpr int LINE_PARAMS = 6;
+  static constexpr int MIN_LINE_PARAMS = 6;
+  static constexpr int MAX_LINE_PARAMS = 7;
 
   struct Param {
     int ielement, jelement, kelement;
     double k, theta0, rho;
+    double cut_ij, cut_ik;
   };
 
  protected:
-  double cutmax;              // three-body term cutoff
+  double **cutmax;            // three-body term cutoff
   Param *params;              // parameter set for an I-J-K interaction
   int maxshort;               // size of short neighbor list array
   int *neighshort;            // short neighbor list array

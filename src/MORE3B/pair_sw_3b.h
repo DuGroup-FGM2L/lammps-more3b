@@ -40,6 +40,20 @@ class PairSW3B : public Pair {
     double epsilon, lambda, costheta;
     double a_ij, a_ik, gamma_ij, gamma_ik, sigma_ij, sigma_ik;
     int ielement, jelement, kelement;
+    int is_artificial, is_zero;
+  };
+
+  struct MaxParamLengths {
+    int epsilon, decepsilon;
+    int lambda, declambda;
+    int costheta, deccostheta;
+    int a_ij, deca_ij;
+    int a_ik, deca_ik;
+    int gamma_ij, decgamma_ij;
+    int gamma_ik, decgamma_ik;
+    int sigma_ij, decsigma_ij;
+    int sigma_ik, decsigma_ik;
+    int iname, jname, kname;
   };
 
  protected:
@@ -49,11 +63,15 @@ class PairSW3B : public Pair {
   int *neighshort;            // short neighbor list array
   int params_mapped;          // whether parameters have been read and mapped to elements
   int use_symmetry;           // treat ABC and ACB triplets the same
+  MaxParamLengths mparam;     // Single struct that will keep maximum string lengths
+
 
   void settings(int, char **) override;
   virtual void allocate();
   virtual void read_file(char *);
   virtual void setup_params();
+
+  int count_decimal_digits(const std::string&);
 
   void threebody(Param *, double, double, double *, double *,
                        double *, double *, double *, int, double &);

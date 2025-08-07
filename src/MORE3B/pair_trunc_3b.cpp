@@ -27,6 +27,7 @@
 #include "neigh_list.h"
 #include "neighbor.h"
 #include "potential_file_reader.h"
+#include "domain.h"
 
 #include <cmath>
 #include <cstring>
@@ -124,7 +125,7 @@ void PairTrunc3B::compute(int eflag, int vflag)
             (x[j][2] - x[i][2]) * (x[j][2] - x[i][2]);
 
       //Build list of close neighbors to i to iterate over all i-j-k triplets
-      if (rsq >= cutmax * cutmax) {
+      if (rsq >= cutmax[itype][jtype] * cutmax[itype][jtype]) {
         continue;
       } else {
         neighshort[numshort++] = j;
@@ -195,12 +196,15 @@ void PairTrunc3B::allocate()
 
 void PairTrunc3B::settings(int narg, char ** arg)
 {
-  if (narg > 1)
-    error->all(FLERR, "Pair style trunc/3b received {} arguments when only 1 (cutoff) is required", narg);
-  if (narg == 0)
-    error->all(FLERR, "Missing a required parameter (cutoff) for pair_style trunc/3b");
-
-  cutmax = utils::numeric(FLERR, arg[0], false, lmp);
+  // process optional keywords
+  int iarg = 0;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "sym") == 0) {
+      if (iarg + 2 > narg) utils::missing_cmd_args(FLERR, "pair_style trunc/3b", error);
+      use_symmetry = utils::logical(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
+    } else error->all(FLERR, "Illegal pair_style trunc/3b keyword: {}", arg[iarg]);
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -249,7 +253,7 @@ double PairTrunc3B::init_one(int i, int j)
     error->all(FLERR, Error::NOLASTLINE,
                "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
-  return cutmax;
+  return cutmax[i][j];
 }
 
 
@@ -274,11 +278,11 @@ void PairTrunc3B::read_file(char *file)
     double conversion_factor = utils::get_conversion_factor(utils::ENERGY,
                                                             unit_convert);
 
-    while ((line = reader.next_line(LINE_PARAMS))) {
+    while ((line = reader.next_line(MIN_LINE_PARAMS))) {
       try {
         words_in_line = utils::count_words(line);
 
-        if (words_in_line != LINE_PARAMS)
+        if (words_in_line != MIN_LINE_PARAMS && words_in_line != MAX_LINE_PARAMS)
           error->one(FLERR,"Incorrect number of trunc/3b parameters ({}). Only {} lines read.", words_in_line, nparams);
 
         ValueTokenizer values(line);
@@ -326,6 +330,12 @@ void PairTrunc3B::read_file(char *file)
         params[nparams].k      = values.next_double();
         params[nparams].theta0 = values.next_double();
         params[nparams].rho    = values.next_double();
+        params[nparams].cut_ij  = values.next_double();
+
+        if (words_in_line == MAX_LINE_PARAMS)
+          params[nparams].cut_ik = values.next_double();
+        else
+          params[nparams].cut_ik = params[nparams].cut_ij;
 
 
       } catch (TokenizerException &e) {
@@ -338,7 +348,7 @@ void PairTrunc3B::read_file(char *file)
       }
 
       //Check physicality of values
-      if (params[nparams].k < 0          || params[nparams].rho < 0)
+      if (params[nparams].k < 0 || params[nparams].rho < 0)
         error->one(FLERR,"Illegal trunc/3b parameter");
 
       nparams++;
@@ -359,69 +369,152 @@ void PairTrunc3B::read_file(char *file)
 
 void PairTrunc3B::setup_params()
 {
-  int i, j, k, m, n;
+  int i,j,k,m,n;
 
   // set elem3param for all triplet combinations
 
+  if (use_symmetry) utils::logmesg(lmp, "  Symmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n");
+
+
+
   memory->destroy(elem3param);
   memory->create(elem3param, nelements, nelements, nelements, "pair:elem3param");
+
+  //First initialize every entry to later check whether its value is defined by symetry
   for (i = 0; i < nelements; i++){
     for (j = 0; j < nelements; j++){
       for (k = 0; k < nelements; k++){
-        
+        elem3param[i][j][k] = -1;
+      }
+    }
+  }
+
+  for (i = 0; i < nelements; i++){
+    for (j = 0; j < nelements; j++){
+      for (k = 0; k < nelements; k++){
+
         //For each possible triplet combination find corresponding parameter set
         n = -1;
         for (m = 0; m < nparams; m++){
-
-          if (i == params[m].ielement && j == params[m].jelement &&
-              k == params[m].kelement ||
-              i == params[m].ielement && k == params[m].jelement &&
-              j == params[m].kelement) {
-
-            if (n >= 0) error->all(FLERR, "Potential file has a duplicate entry for: {} {} {}", elements[i], elements[j], elements[k]);
-
-            if (n >= 0){
-              utils::logmesg(lmp, "  Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
-            } else {
+          if (i == params[m].ielement && j == params[m].jelement && k == params[m].kelement){ 
+            //If found match for the first time record index. Else disregard and issue message
+            if (n == -1){
               n = m;
+              if (elem3param[i][j][k] >= 0 && use_symmetry){
+                elem3param[i][j][k] = -1;
+                utils::logmesg(lmp, "WARNING: Symmetry useage is on, but coefficients for both ({}-{}-{}) and ({}-{}-{}) have been supplied. Will use separate sets of coefficients for each triplet.\n", elements[i], elements[k], elements[j], elements[i], elements[j], elements[k]);
+              }
+            } else { 
+              utils::logmesg(lmp, "WARNING: Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
             }
           }
         }
 
-        //If no coefficients were provided initialize them to 0
-        if (n < 0){
-          //Check if params array needs to grow
-          if (nparams == maxparam) {
-            maxparam += DELTA;
-            params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
-                                                "pair:params");
-            memset(params + nparams, 0, DELTA*sizeof(Param));
+
+        //If this entry is not defined as a symmetric one
+        if (elem3param[i][j][k] < 0){
+          //If no coefficients were provided initialize them to 0
+          if (n < 0){
+            //Check if params array needs to grow
+            if (nparams == maxparam) {
+              maxparam += DELTA;
+              params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
+                                                  "pair:params");
+              memset(params + nparams, 0, DELTA*sizeof(Param));
+            }
+
+            utils::logmesg(lmp, "WARNING:  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
+
+            params[nparams].ielement = i;
+            params[nparams].jelement = j;
+            params[nparams].kelement = k;
+
+            params[nparams].k      = 0;
+            params[nparams].theta0 = 0;
+            params[nparams].rho    = 0;
+            params[nparams].cut_ij = 0;
+            params[nparams].cut_ik = 0;
+
+            n = nparams;
+            nparams++;
+
           }
 
-          utils::logmesg(lmp, "  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
-          
-          params[nparams].ielement  = i;
-          params[nparams].jelement  = j;
-          params[nparams].kelement  = k;
+          elem3param[i][j][k] = n;
 
-          params[nparams].k      = 0;
-          params[nparams].theta0 = 0;
-          params[nparams].rho    = 0;
-          
-          n = nparams;
-          nparams++;
+          //Generate a symmetric entry if needed
+          if (use_symmetry){
+            //Check if params array needs to grow
+            if (nparams == maxparam) {
+              maxparam += DELTA;
+              params = (Param *) memory->srealloc(params,maxparam*sizeof(Param),
+                                                  "pair:params");
+              memset(params + nparams, 0, DELTA*sizeof(Param));
+            }
 
+            params[nparams].ielement = i;
+            params[nparams].jelement = k;
+            params[nparams].kelement = j;
+
+            params[nparams].k      = params[n].k;
+            params[nparams].theta0 = params[n].theta0;
+            params[nparams].rho    = params[n].rho;
+
+            params[nparams].cut_ij = params[n].cut_ik;
+            params[nparams].cut_ik = params[n].cut_ij;
+
+            n = nparams;
+            nparams++;
+
+            elem3param[i][k][j] = n;
+          }
         }
-        elem3param[i][j][k] = n;
-        elem3param[i][k][j] = n;
       }
+    }
+  }
+
+  double *lo;
+  double *hi;
+
+  if (domain->triclinic == 0) {
+    lo = domain->boxlo;
+    hi = domain->boxhi;
+  } else {
+    lo = domain->boxlo_lamda;
+    hi = domain->boxhi_lamda;
+  }
+
+  double xside = hi[0] - lo[0];
+  double yside = hi[1] - lo[1];
+  double zside = hi[2] - lo[2];
+
+  //Record maximum needed cutoff distance for neighborlist builds
+  memory->create(cutmax, nelements, nelements, "pair:cutmax");
+  double cut;
+  for (i = 0; i < nelements; i++){
+    for (j = 0; j < nelements; j++){
+      cutmax[i][j] = 0;
+
+      //For each pair in cutmax scan all parameter sets
+      for (m = 0; m < nparams; m++) {
+        if (i == params[m].ielement && j == params[m].jelement ||
+            i == params[m].jelement && j == params[m].ielement){
+            if (params[m].cut_ij > cutmax[i][j]) cutmax[i][j] = params[m].cut_ij;
+        }
+        if (i == params[m].ielement && j == params[m].kelement ||
+            i == params[m].kelement && j == params[m].ielement){
+            if (params[m].cut_ik > cutmax[i][j]) cutmax[i][j] = params[m].cut_ik;
+        }
+      }
+      if (cutmax[i][j] > xside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], xside);
+      if (cutmax[i][j] > yside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], yside);
+      if (cutmax[i][j] > zside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], zside);
     }
   }
 }
 
 /* ---------------------------------------------------------------------- */
 
-//CORRECT FROM COS DIF TO ANGLE DIF
 void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
                        double *vr_ij, double *vr_ik,
                        double *fi, double *fj, double *fk, int eflag, double &eng)
@@ -451,7 +544,9 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
   double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8);
   double angledif = theta - theta0;
 
-  U = 0.5 * k * angledif * angledif * expon;
+  if      (param->cut_ij <= r_ij) U = 0;
+  else if (param->cut_ik <= r_ik) U = 0;
+  else    U = 0.5 * k * angledif * angledif * expon;
 
   if (!U){
     U_rij = 0;
