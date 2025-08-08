@@ -59,7 +59,7 @@ PairSW3B::PairSW3B(LAMMPS *lmp) : Pair(lmp)
   maxshort = 10;
   neighshort = nullptr;
 
-  //Zero out parameters that will store max length of strings
+  //Initialize parameters that will store max length of strings
   mparam.lambda   = 6; //lambda
   mparam.epsilon  = 3; //eps
   mparam.costheta = 3; //cos
@@ -505,7 +505,7 @@ void PairSW3B::setup_params()
 
   // set elem3param for all triplet combinations
 
-  if (use_symmetry) utils::logmesg(lmp, "  Symmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n");
+  if (use_symmetry) utils::logmesg(lmp, "\nSymmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n\n");
 
 
 
@@ -534,6 +534,7 @@ void PairSW3B::setup_params()
             //If found match for the first time record index. Else disregard and issue message
             if (n == -1){
               n = m;
+              //Check if user is overwriting instance implied from symmetry
               if (elem3param[i][j][k] >= 0 && use_symmetry && !params[m].is_artificial){
                 force_rewrite = 1;
                 utils::logmesg(lmp, "WARNING: Symmetry useage is on, but coefficients for both ({}-{}-{}) and ({}-{}-{}) have been supplied. Will use separate sets of coefficients for each triplet.\n", elements[i], elements[k], elements[j], elements[i], elements[j], elements[k]);
@@ -542,13 +543,14 @@ void PairSW3B::setup_params()
               if (!params[m].is_artificial)
                 utils::logmesg(lmp, "WARNING: Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
 
+              //Disregard duplicates (only necesary for future printing)
               params[m].is_zero = 1;
             }
           }
         }
 
 
-        //If this entry is not defined as a symmetric one
+        //If this entry is not defined as a symmetric one (or if rewrite needed)
         if (elem3param[i][j][k] < 0 || force_rewrite){
           //If no coefficients were provided initialize them to 0
           if (n < 0){
@@ -666,24 +668,18 @@ void PairSW3B::setup_params()
   utils::logmesg(lmp, "\n");
 
 
-
-  double *lo;
-  double *hi;
-
-  if (domain->triclinic == 0) {
-    lo = domain->boxlo;
-    hi = domain->boxhi;
-  } else {
-    lo = domain->boxlo_lamda;
-    hi = domain->boxhi_lamda;
-  }
-
-  double xside = hi[0] - lo[0];
-  double yside = hi[1] - lo[1];
-  double zside = hi[2] - lo[2];
-
   //Record maximum needed cutoff distance for neighborlist builds
   memory->create(cutmax, nelements, nelements, "pair:cutmax");
+
+  int warning_issued[nelements][nelements][3];
+  for (i = 0; i < nelements; i++){
+    for (j = 0; j < nelements; j++){
+      warning_issued[i][j][0] = 0;
+      warning_issued[i][j][1] = 0;
+      warning_issued[i][j][2] = 0;
+    }
+  }
+
   double cut;
   for (i = 0; i < nelements; i++){
     for (j = 0; j < nelements; j++){
@@ -702,9 +698,21 @@ void PairSW3B::setup_params()
             if (cut > cutmax[i][j]) cutmax[i][j] = cut;
         }
       }
-      if (cutmax[i][j] > xside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], xside);
-      if (cutmax[i][j] > yside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], yside);
-      if (cutmax[i][j] > zside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], zside);
+      if (cutmax[i][j] > domain->xprd && !warning_issued[i][j][0]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->xprd);
+        warning_issued[i][j][0] = 1;
+        warning_issued[j][i][0] = 1;
+      }
+      if (cutmax[i][j] > domain->yprd && !warning_issued[i][j][1]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->yprd);
+        warning_issued[i][j][1] = 1;
+        warning_issued[j][i][1] = 1;
+      }
+      if (cutmax[i][j] > domain->zprd && !warning_issued[i][j][2]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->zprd);
+        warning_issued[i][j][2] = 1;
+        warning_issued[j][i][2] = 1;
+      }
     }
   }
 

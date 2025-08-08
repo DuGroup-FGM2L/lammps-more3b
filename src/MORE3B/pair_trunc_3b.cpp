@@ -31,6 +31,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <string>
+#include <cctype>
 
 using namespace LAMMPS_NS;
 
@@ -55,6 +57,22 @@ PairTrunc3B::PairTrunc3B(LAMMPS *lmp) : Pair(lmp)
 
   maxshort = 10;
   neighshort = nullptr;
+
+  //Initialize parameters that will store max length of strings
+  mparam.k      = 1; //k
+  mparam.theta0 = 6; //theta0
+  mparam.rho    = 3; //rho
+  mparam.cut_ij = 6; //cut_ij
+  mparam.cut_ik = 6; //cut_ik
+  mparam.iname  = 4; //i_el
+  mparam.jname  = 4; //j_el
+  mparam.kname  = 4; //k_el
+
+  mparam.deck      = 0;
+  mparam.dectheta0 = 0;
+  mparam.decrho    = 0;
+  mparam.deccut_ij = 0;
+  mparam.deccut_ik = 0;
 }
 
 /* ----------------------------------------------------------------------
@@ -253,7 +271,7 @@ double PairTrunc3B::init_one(int i, int j)
     error->all(FLERR, Error::NOLASTLINE,
                "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
-  return cutmax[i][j];
+  return cutmax[map[i]][map[j]];
 }
 
 
@@ -265,6 +283,9 @@ void PairTrunc3B::read_file(char *file)
   params = nullptr;
   nparams = maxparam = 0;
   int words_in_line;
+
+  std::string tmpstr;
+  int tmplen, numdec;
 
   // open file on proc 0
 
@@ -337,6 +358,56 @@ void PairTrunc3B::read_file(char *file)
         else
           params[nparams].cut_ik = params[nparams].cut_ij;
 
+        ValueTokenizer values2(line);
+
+        tmplen = values2.next_string().length();
+        mparam.iname = tmplen > mparam.iname ? tmplen : mparam.iname;
+
+        tmplen = values2.next_string().length();
+        mparam.jname = tmplen > mparam.jname ? tmplen : mparam.jname;
+
+        tmplen = values2.next_string().length();
+        mparam.kname = tmplen > mparam.kname ? tmplen : mparam.kname;
+
+        // k
+        tmpstr = values2.next_string();
+        tmplen = tmpstr.length();
+        numdec = count_decimal_digits(tmpstr);
+        mparam.k         = tmplen > mparam.k ? tmplen : mparam.k;
+        mparam.deck      = numdec > mparam.deck ? numdec : mparam.deck;
+
+        // theta0
+        tmpstr = values2.next_string();
+        tmplen = tmpstr.length();
+        numdec = count_decimal_digits(tmpstr);
+        mparam.theta0    = tmplen > mparam.theta0    ? tmplen : mparam.theta0;
+        mparam.dectheta0 = numdec > mparam.dectheta0 ? numdec : mparam.dectheta0;
+
+         // rho
+        tmpstr = values2.next_string();
+        tmplen = tmpstr.length();
+        numdec = count_decimal_digits(tmpstr);
+        mparam.rho       = tmplen > mparam.rho    ? tmplen : mparam.rho;
+        mparam.decrho    = numdec > mparam.decrho ? numdec : mparam.decrho;
+        
+        // cut_ij
+        tmpstr = values2.next_string();
+        tmplen = tmpstr.length();
+        numdec = count_decimal_digits(tmpstr);
+        mparam.cut_ij    = tmplen > mparam.cut_ij    ? tmplen : mparam.cut_ij;
+        mparam.deccut_ij = numdec > mparam.deccut_ij ? numdec : mparam.deccut_ij;
+        
+        if (words_in_line == MAX_LINE_PARAMS){
+          tmpstr = values2.next_string();
+          tmplen = tmpstr.length();
+          numdec = count_decimal_digits(tmpstr);
+          mparam.cut_ik    = tmplen > mparam.cut_ik    ? tmplen : mparam.cut_ik;
+          mparam.deccut_ik = numdec > mparam.deccut_ik ? numdec : mparam.deccut_ik;
+
+        } else {
+          mparam.cut_ik    = mparam.cut_ij;
+          mparam.deccut_ik = mparam.deccut_ij;
+        }
 
       } catch (TokenizerException &e) {
         error->one(FLERR, e.what());
@@ -349,7 +420,7 @@ void PairTrunc3B::read_file(char *file)
 
       //Check physicality of values
       if (params[nparams].k < 0 || params[nparams].rho < 0)
-        error->one(FLERR,"Illegal trunc/3b parameter");
+        error->one(FLERR,"Illegal (unphysical) trunc/3b parameter");
 
       nparams++;
     }
@@ -370,10 +441,11 @@ void PairTrunc3B::read_file(char *file)
 void PairTrunc3B::setup_params()
 {
   int i,j,k,m,n;
+  int force_rewrite;
 
   // set elem3param for all triplet combinations
 
-  if (use_symmetry) utils::logmesg(lmp, "  Symmetry for pair_style sw/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n");
+  if (use_symmetry) utils::logmesg(lmp, "\nSymmetry for pair_style trunc/3b turned on. Will treat triplets i-j-k identical to i-k-j where i is the central atom.\n\n");
 
 
 
@@ -395,24 +467,32 @@ void PairTrunc3B::setup_params()
 
         //For each possible triplet combination find corresponding parameter set
         n = -1;
+        force_rewrite = 0;
         for (m = 0; m < nparams; m++){
-          if (i == params[m].ielement && j == params[m].jelement && k == params[m].kelement){ 
+          if (i == params[m].ielement && j == params[m].jelement && k == params[m].kelement){
+
             //If found match for the first time record index. Else disregard and issue message
             if (n == -1){
               n = m;
-              if (elem3param[i][j][k] >= 0 && use_symmetry){
-                elem3param[i][j][k] = -1;
+              //Check if user is overwriting instance implied from symmetry
+              if (elem3param[i][j][k] >= 0 && use_symmetry && !params[m].is_artificial){
+                force_rewrite = 1;
                 utils::logmesg(lmp, "WARNING: Symmetry useage is on, but coefficients for both ({}-{}-{}) and ({}-{}-{}) have been supplied. Will use separate sets of coefficients for each triplet.\n", elements[i], elements[k], elements[j], elements[i], elements[j], elements[k]);
               }
-            } else { 
-              utils::logmesg(lmp, "WARNING: Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
+            } else {
+              //If symmetry implied instance has been overwritten, then no need to warn
+              if (!params[m].is_artificial)
+                utils::logmesg(lmp, "WARNING: Duplicate entry for triplet {} {} {} found. This information will be ignored.\n", elements[i], elements[j], elements[k]);
+
+              //Disregard duplicates (only necesary for future printing)
+              params[m].is_zero = 1;
             }
           }
         }
 
 
-        //If this entry is not defined as a symmetric one
-        if (elem3param[i][j][k] < 0){
+        //If this entry is not defined as a symmetric one (or if rewrite needed)
+        if (elem3param[i][j][k] < 0 || force_rewrite){
           //If no coefficients were provided initialize them to 0
           if (n < 0){
             //Check if params array needs to grow
@@ -424,17 +504,21 @@ void PairTrunc3B::setup_params()
             }
 
             utils::logmesg(lmp, "WARNING:  No coefficients were provided for triplet {} {} {} with sw/3b pair_style. Stting them to 0.\n", elements[i], elements[j], elements[k]);
-
+            
             params[nparams].ielement = i;
             params[nparams].jelement = j;
             params[nparams].kelement = k;
 
-            params[nparams].k      = 0;
-            params[nparams].theta0 = 0;
-            params[nparams].rho    = 0;
-            params[nparams].cut_ij = 0;
-            params[nparams].cut_ik = 0;
+            params[nparams].k        = 0;
+            params[nparams].theta0   = 0;
+            params[nparams].rho      = 0;
 
+            params[nparams].cut_ij   = 0;
+            params[nparams].cut_ik   = 0;
+
+            params[nparams].is_artificial = 1;
+            params[nparams].is_zero  = 1;
+            
             n = nparams;
             nparams++;
 
@@ -443,7 +527,7 @@ void PairTrunc3B::setup_params()
           elem3param[i][j][k] = n;
 
           //Generate a symmetric entry if needed
-          if (use_symmetry){
+          if (use_symmetry && !force_rewrite && j != k){
             //Check if params array needs to grow
             if (nparams == maxparam) {
               maxparam += DELTA;
@@ -456,13 +540,16 @@ void PairTrunc3B::setup_params()
             params[nparams].jelement = k;
             params[nparams].kelement = j;
 
-            params[nparams].k      = params[n].k;
-            params[nparams].theta0 = params[n].theta0;
-            params[nparams].rho    = params[n].rho;
+            params[nparams].k        = params[n].k;
+            params[nparams].theta0   = params[n].theta0;
+            params[nparams].rho      = params[n].rho;
 
-            params[nparams].cut_ij = params[n].cut_ik;
-            params[nparams].cut_ik = params[n].cut_ij;
+            params[nparams].cut_ij  = params[n].cut_ik;
+            params[nparams].cut_ik  = params[n].cut_ij;
 
+            params[nparams].is_zero = params[n].is_zero;
+            params[nparams].is_artificial = 1;
+            
             n = nparams;
             nparams++;
 
@@ -473,23 +560,47 @@ void PairTrunc3B::setup_params()
     }
   }
 
-  double *lo;
-  double *hi;
+  utils::logmesg(lmp, "\n");
+  utils::logmesg(lmp, "\nNon-zero triplet energy coefficients:\n");
+  utils::logmesg(lmp,
+      "{:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}}\n",
+      "i_el",       mparam.iname,
+      "j_el",       mparam.jname,
+      "k_el",       mparam.kname,
+      "k",          mparam.k,
+      "theta0",     mparam.theta0,
+      "rho",        mparam.rho,
+      "cut_ij",     mparam.cut_ij,
+      "cut_ik",     mparam.cut_ik
+  );
 
-  if (domain->triclinic == 0) {
-    lo = domain->boxlo;
-    hi = domain->boxhi;
-  } else {
-    lo = domain->boxlo_lamda;
-    hi = domain->boxhi_lamda;
+  for (m = 0; m < nparams; m++){
+    if (!params[m].is_zero)
+      utils::logmesg(lmp,
+          "{:<{}} {:<{}} {:<{}} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f}\n",
+          elements[params[m].ielement], mparam.iname,
+          elements[params[m].jelement], mparam.jname,
+          elements[params[m].kelement], mparam.kname,
+          params[m].k,                  mparam.k,      mparam.deck,
+          params[m].theta0,             mparam.theta0, mparam.dectheta0,
+          params[m].rho,                mparam.rho,    mparam.decrho,
+          params[m].cut_ij,             mparam.cut_ij, mparam.deccut_ij, 
+          params[m].cut_ik,             mparam.cut_ik, mparam.deccut_ik
+          );
   }
+  utils::logmesg(lmp, "\n");
 
-  double xside = hi[0] - lo[0];
-  double yside = hi[1] - lo[1];
-  double zside = hi[2] - lo[2];
 
   //Record maximum needed cutoff distance for neighborlist builds
   memory->create(cutmax, nelements, nelements, "pair:cutmax");
+  int warning_issued[nelements][nelements][3];
+  for (i = 0; i < nelements; i++){
+    for (j = 0; j < nelements; j++){
+      warning_issued[i][j][0] = 0;
+      warning_issued[i][j][1] = 0;
+      warning_issued[i][j][2] = 0;
+    }
+  }
   double cut;
   for (i = 0; i < nelements; i++){
     for (j = 0; j < nelements; j++){
@@ -506,11 +617,25 @@ void PairTrunc3B::setup_params()
             if (params[m].cut_ik > cutmax[i][j]) cutmax[i][j] = params[m].cut_ik;
         }
       }
-      if (cutmax[i][j] > xside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], xside);
-      if (cutmax[i][j] > yside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], yside);
-      if (cutmax[i][j] > zside) utils::logmesg(lmp, "WARNING: | pair_style sw/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], zside);
+      if (cutmax[i][j] > domain->xprd && !warning_issued[i][j][0]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region x-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->xprd);
+        warning_issued[i][j][0] = 1;
+        warning_issued[j][i][0] = 1;
+      }
+      if (cutmax[i][j] > domain->yprd && !warning_issued[i][j][1]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region y-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->yprd);
+        warning_issued[i][j][1] = 1;
+        warning_issued[j][i][1] = 1;
+      }
+      if (cutmax[i][j] > domain->zprd && !warning_issued[i][j][2]){
+        utils::logmesg(lmp, "WARNING: | pair_style trunc/3b | Recorded cutoff of {} for pair ({} {}) which exceeds simulation region z-dimension of {}.\n", cutmax[i][j], elements[i], elements[j], domain->zprd);
+        warning_issued[i][j][2] = 1;
+        warning_issued[j][i][2] = 1;
+      }
     }
   }
+
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -520,66 +645,97 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
                        double *fi, double *fj, double *fk, int eflag, double &eng)
 {
   double U; //Triplet potential energy
-  
-  //Partial derivatives of energy with respect to the variables it is a function of
-  double U_rij, U_rik, U_theta; 
-  double f_ij, f_ik, f_jk; //Equivalent to lammps f_i1, f_i2, f_j2 notation
 
-  double r_ij = sqrt(rsq_ij); //Distance between atoms i and j
-  double r_ik = sqrt(rsq_ik); //Distance between atoms i and k
+  if (!param->is_zero){
+    //Partial derivatives of energy with respect to the variables it is a function of
+    double U_rij, U_rik, U_theta; 
+    double f_ij, f_ik, f_jk; //Equivalent to lammps f_i1, f_i2, f_j2 notation
 
-  //Parameters of the triplet
-  double k = param->k;
-  double theta0 = param->theta0;
-  double rho = param->rho;
+    double r_ij = sqrt(rsq_ij); //Distance between atoms i and j
+    double r_ik = sqrt(rsq_ik); //Distance between atoms i and k
 
-  double costheta  = (vr_ij[0] * vr_ik[0] + vr_ij[1] * vr_ik[1] + vr_ij[2] * vr_ik[2])/(r_ij * r_ik);
-  costheta = costheta < -1 ? -1 : (costheta > 1 ? 1 : costheta);
-  double theta = acos(costheta);
-  double sintheta = sqrt(1 - costheta * costheta);
-  sintheta = sintheta < -1 ? -1 : (sintheta > 1 ? 1 : sintheta);
+    //Parameters of the triplet
+    double k = param->k;
+    double theta0 = param->theta0;
+    double rho = param->rho;
 
-  //Recuring parts
-  double rho8 = pow(rho, 8);
-  double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8);
-  double angledif = theta - theta0;
+    double costheta  = (vr_ij[0] * vr_ik[0] + vr_ij[1] * vr_ik[1] + vr_ij[2] * vr_ik[2])/(r_ij * r_ik);
+    costheta = costheta < -1 ? -1 : (costheta > 1 ? 1 : costheta);
+    double theta = acos(costheta);
+    double sintheta = sqrt(1 - costheta * costheta);
+    sintheta = sintheta < -1 ? -1 : (sintheta > 1 ? 1 : sintheta);
 
-  if      (param->cut_ij <= r_ij) U = 0;
-  else if (param->cut_ik <= r_ik) U = 0;
-  else    U = 0.5 * k * angledif * angledif * expon;
+    //Recuring parts
+    double rho8 = pow(rho, 8);
+    double expon = exp(-(pow(r_ij, 8) + pow(r_ik, 8))/rho8);
+    double angledif = theta - theta0;
 
-  if (!U){
-    U_rij = 0;
-    U_rik = 0;
-    U_theta = 0;
+    if      (param->cut_ij <= r_ij) U = 0;
+    else if (param->cut_ik <= r_ik) U = 0;
+    else    U = 0.5 * k * angledif * angledif * expon;
+
+    if (!U){
+      U_rij = 0;
+      U_rik = 0;
+      U_theta = 0;
+    } else {
+      U_rij   = -U * 8 * pow(r_ij, 7) / rho8;
+
+      U_rik   = -U * 8 * pow(r_ik, 7) / rho8;
+
+      U_theta = k * angledif * expon;
+    }
+
+    //Force per length atom j exhibits on atom i along vector from i to j
+    f_ij = (U_rij / r_ij) + U_theta * (r_ik * costheta - r_ij) / (r_ij * r_ij * r_ik * sintheta);
+    //Force per length atom k exhibits on atom i along vector from i to k
+    f_ik = (U_rik / r_ik) + U_theta * (r_ij * costheta - r_ik) / (r_ik * r_ik * r_ij * sintheta);
+    //Force per length atom k exhibits on atom j along vector from j to k
+    f_jk = U_theta / (r_ij * r_ik * sintheta);
+
+    double vr_jk[3] = {vr_ik[0] - vr_ij[0], vr_ik[1] - vr_ij[1], vr_ik[2] - vr_ij[2]};
+
+    fi[0] = vr_ij[0] * f_ij + vr_ik[0] * f_ik;
+    fi[1] = vr_ij[1] * f_ij + vr_ik[1] * f_ik;
+    fi[2] = vr_ij[2] * f_ij + vr_ik[2] * f_ik;
+
+    fj[0] = vr_ij[0] * (-f_ij) + vr_jk[0] * f_jk;
+    fj[1] = vr_ij[1] * (-f_ij) + vr_jk[1] * f_jk;
+    fj[2] = vr_ij[2] * (-f_ij) + vr_jk[2] * f_jk;
+
+    fk[0] = vr_ik[0] * (-f_ik) + vr_jk[0] * (-f_jk);
+    fk[1] = vr_ik[1] * (-f_ik) + vr_jk[1] * (-f_jk);
+    fk[2] = vr_ik[2] * (-f_ik) + vr_jk[2] * (-f_jk);
+
   } else {
-    U_rij   = -U * 8 * pow(r_ij, 7) / rho8;
+    U = 0;
 
-    U_rik   = -U * 8 * pow(r_ik, 7) / rho8;
+    fi[0] = 0;
+    fi[1] = 0;
+    fi[2] = 0;
 
-    U_theta = k * angledif * expon;
+    fj[0] = 0;
+    fj[1] = 0;
+    fj[2] = 0;
+
+    fk[0] = 0;
+    fk[1] = 0;
+    fk[2] = 0;
   }
 
-  //Force per length atom j exhibits on atom i along vector from i to j
-  f_ij = (U_rij / r_ij) + U_theta * (r_ik * costheta - r_ij) / (r_ij * r_ij * r_ik * sintheta);
-  //Force per length atom k exhibits on atom i along vector from i to k
-  f_ik = (U_rik / r_ik) + U_theta * (r_ij * costheta - r_ik) / (r_ik * r_ik * r_ij * sintheta);
-  //Force per length atom k exhibits on atom j along vector from j to k
-  f_jk = U_theta / (r_ij * r_ik * sintheta);
-
-  double vr_jk[3] = {vr_ik[0] - vr_ij[0], vr_ik[1] - vr_ij[1], vr_ik[2] - vr_ij[2]};
-
-  fi[0] = vr_ij[0] * f_ij + vr_ik[0] * f_ik;
-  fi[1] = vr_ij[1] * f_ij + vr_ik[1] * f_ik;
-  fi[2] = vr_ij[2] * f_ij + vr_ik[2] * f_ik;
-
-  fj[0] = vr_ij[0] * (-f_ij) + vr_jk[0] * f_jk;
-  fj[1] = vr_ij[1] * (-f_ij) + vr_jk[1] * f_jk;
-  fj[0] = vr_ij[2] * (-f_ij) + vr_jk[2] * f_jk;
-
-  fk[0] = vr_ik[0] * (-f_ik) + vr_jk[0] * (-f_jk);
-  fk[1] = vr_ik[1] * (-f_ik) + vr_jk[1] * (-f_jk);
-  fk[2] = vr_ik[2] * (-f_ik) + vr_jk[2] * (-f_jk);
-
   if (eflag) eng = U;
+}
+
+int PairTrunc3B::count_decimal_digits(const std::string& str) {
+    std::size_t dot_pos = str.find('.');
+    if (dot_pos == std::string::npos)
+        return 0;  // No decimal point
+
+    int count = 0;
+    for (std::size_t i = dot_pos + 1; i < str.size(); ++i) {
+        if (!std::isdigit(str[i]))
+            break;
+        ++count;
+    }
+    return count;
 }

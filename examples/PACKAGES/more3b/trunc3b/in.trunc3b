@@ -14,7 +14,7 @@ read_data           data.trunc3b
 mass                1 28.085 #Si
 mass                2 15.999 #O
 
-pair_style          trunc/3b 2.5
+pair_style          trunc/3b
 
 pair_coeff          * * SiO.trunc3b Si O
 

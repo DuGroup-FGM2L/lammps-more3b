@@ -1,4 +1,4 @@
 #Parameters are random
 #UNITS:real
-#i  j  k   k (spring) rho   theta (rads)
-O  Si  Si  5.00       2.00  1.909
+#i_el  j_el  k_el   k     rho   theta (rads) cut_ij
+ O      Si   Si     5.00  2.00  1.909        2.5

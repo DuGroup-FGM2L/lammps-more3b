@@ -13,7 +13,7 @@
 
 #ifdef PAIR_CLASS
 // clang-format off
-//PairStyle(trunc/3b,PairTrunc3B);
+PairStyle(trunc/3b,PairTrunc3B);
 // clang-format on
 #else
 
@@ -33,13 +33,24 @@ class PairTrunc3B : public Pair {
   double init_one(int, int) override;
   void init_style() override;
 
-  static constexpr int MIN_LINE_PARAMS = 6;
-  static constexpr int MAX_LINE_PARAMS = 7;
+  static constexpr int MIN_LINE_PARAMS = 7;
+  static constexpr int MAX_LINE_PARAMS = 8;
 
   struct Param {
     int ielement, jelement, kelement;
     double k, theta0, rho;
     double cut_ij, cut_ik;
+    int is_zero;
+    int is_artificial;
+  };
+
+  struct MaxParamLengths {
+    int k, deck;
+    int theta0, dectheta0;
+    int rho, decrho;
+    int cut_ij, deccut_ij;
+    int cut_ik, deccut_ik;
+    int iname, jname, kname;
   };
 
  protected:
@@ -49,11 +60,14 @@ class PairTrunc3B : public Pair {
   int *neighshort;            // short neighbor list array
   int params_mapped;          // whether parameters have been read and mapped to elements
   int use_symmetry;           // treat ABC and ACB triplets the same
+  MaxParamLengths mparam;     // Single struct that will keep maximum string lengths
 
   void settings(int, char **) override;
   virtual void allocate();
   virtual void read_file(char *);
   virtual void setup_params();
+
+  int count_decimal_digits(const std::string&);
 
   void threebody(Param *, double, double, double *, double *,
                        double *, double *, double *, int, double &);
