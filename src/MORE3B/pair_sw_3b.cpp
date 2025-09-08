@@ -37,6 +37,7 @@
 using namespace LAMMPS_NS;
 
 static constexpr int DELTA = 4;
+static constexpr double TRIG_DELTA = 0.001;
 
 /* ---------------------------------------------------------------------- */
 
@@ -71,7 +72,6 @@ PairSW3B::PairSW3B(LAMMPS *lmp) : Pair(lmp)
   mparam.sigma_ik = 4; //s_ik
   mparam.iname    = 1; //i
   mparam.jname    = 1; //j
-  mparam.kname    = 1; //k
 
   mparam.declambda   = 0;
   mparam.decepsilon  = 0;
@@ -196,6 +196,7 @@ void PairSW3B::compute(int eflag, int vflag)
         f[k][0] += fk[0];
         f[k][1] += fk[1];
         f[k][2] += fk[2];
+
 
         if (evflag) ev_tally3(i, j, k, evdwl, 0.0, fj, fk, r_ij, r_ik);
       }
@@ -389,7 +390,7 @@ void PairSW3B::read_file(char *file)
         mparam.jname = tmplen > mparam.jname ? tmplen : mparam.jname;
 
         tmplen = values2.next_string().length();
-        mparam.kname = tmplen > mparam.kname ? tmplen : mparam.kname;
+        mparam.jname = tmplen > mparam.jname ? tmplen : mparam.jname;
 
         // lambda
         tmpstr = values2.next_string();
@@ -635,7 +636,7 @@ void PairSW3B::setup_params()
       "{:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}}\n",
       "i",          mparam.iname,
       "j",          mparam.jname,
-      "k",          mparam.kname,
+      "k",          mparam.jname,
       "lambda",     mparam.lambda,
       "eps",        mparam.epsilon,
       "cos",        mparam.costheta,
@@ -653,7 +654,7 @@ void PairSW3B::setup_params()
           "{:<{}} {:<{}} {:<{}} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f}\n",
           elements[params[m].ielement], mparam.iname,
           elements[params[m].jelement], mparam.jname,
-          elements[params[m].kelement], mparam.kname,
+          elements[params[m].kelement], mparam.jname,
           params[m].lambda,             mparam.lambda,   mparam.declambda,
           params[m].epsilon,            mparam.epsilon,  mparam.decepsilon,
           params[m].costheta,           mparam.costheta, mparam.deccostheta,
@@ -746,7 +747,10 @@ void PairSW3B::threebody(Param *param, double rsq_ij, double rsq_ik,
     double sigma_ik  = param->sigma_ik;
     double a_ik      = param->a_ik;
     double costheta  = (vr_ij[0] * vr_ik[0] + vr_ij[1] * vr_ik[1] + vr_ij[2] * vr_ik[2])/(r_ij * r_ik);
+    costheta = costheta < -1 ? -1 : (costheta > 1 ? 1 : costheta);
     double sintheta = sqrt(1 - costheta * costheta);
+    sintheta = sintheta < -1 ? -1 : (sintheta > 1 ? 1 : sintheta);
+    sintheta = sintheta == 0 ? TRIG_DELTA : sintheta;
 
     //Recuring parts
     double exp1   = exp(gamma_ij * sigma_ij / (r_ij - a_ij * sigma_ij));
@@ -778,6 +782,7 @@ void PairSW3B::threebody(Param *param, double rsq_ij, double rsq_ik,
     f_ik = (U_rik / r_ik) + U_theta * (r_ij * costheta - r_ik) / (r_ik * r_ik * r_ij * sintheta);
     //Force per length atom k exhibits on atom j along vector from j to k
     f_jk = U_theta / (r_ij * r_ik * sintheta);
+
 
     double vr_jk[3] = {vr_ik[0] - vr_ij[0], vr_ik[1] - vr_ij[1], vr_ik[2] - vr_ij[2]};
 

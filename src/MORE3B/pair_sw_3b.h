@@ -53,7 +53,8 @@ class PairSW3B : public Pair {
     int gamma_ik, decgamma_ik;
     int sigma_ij, decsigma_ij;
     int sigma_ik, decsigma_ik;
-    int iname, jname, kname;
+    //When non-central atoms are reversed due to symmetry length can change (no kname);
+    int iname, jname; 
   };
 
  protected:

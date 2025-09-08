@@ -50,7 +50,7 @@ class PairTrunc3B : public Pair {
     int rho, decrho;
     int cut_ij, deccut_ij;
     int cut_ik, deccut_ik;
-    int iname, jname, kname;
+    int iname, jname;
   };
 
  protected:
