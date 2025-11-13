@@ -175,9 +175,9 @@ void PairTrunc3B::compute(int eflag, int vflag)
         threebody(&params[triplet_param_index], rsq_ij, rsq_jk, r_ij, r_ik,
                   fi, fj, fk, eflag, evdwl);
 
-        f[i][0] = fi[0];
-        f[i][1] = fi[1];
-        f[i][2] = fi[2];
+        f[i][0] += fi[0];
+        f[i][1] += fi[1];
+        f[i][2] += fi[2];
 
         f[j][0] += fj[0];
         f[j][1] += fj[1];
