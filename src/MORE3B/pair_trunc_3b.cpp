@@ -37,6 +37,7 @@
 using namespace LAMMPS_NS;
 
 static constexpr int DELTA = 4;
+static constexpr double TRIG_DELTA = 0.001;
 
 /* ---------------------------------------------------------------------- */
 
@@ -66,7 +67,6 @@ PairTrunc3B::PairTrunc3B(LAMMPS *lmp) : Pair(lmp)
   mparam.cut_ik = 6; //cut_ik
   mparam.iname  = 4; //i_el
   mparam.jname  = 4; //j_el
-  mparam.kname  = 4; //k_el
 
   mparam.deck      = 0;
   mparam.dectheta0 = 0;
@@ -367,7 +367,7 @@ void PairTrunc3B::read_file(char *file)
         mparam.jname = tmplen > mparam.jname ? tmplen : mparam.jname;
 
         tmplen = values2.next_string().length();
-        mparam.kname = tmplen > mparam.kname ? tmplen : mparam.kname;
+        mparam.jname = tmplen > mparam.jname ? tmplen : mparam.jname;
 
         // k
         tmpstr = values2.next_string();
@@ -566,7 +566,7 @@ void PairTrunc3B::setup_params()
       "{:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}} {:<{}}\n",
       "i_el",       mparam.iname,
       "j_el",       mparam.jname,
-      "k_el",       mparam.kname,
+      "k_el",       mparam.jname,
       "k",          mparam.k,
       "theta0",     mparam.theta0,
       "rho",        mparam.rho,
@@ -580,7 +580,7 @@ void PairTrunc3B::setup_params()
           "{:<{}} {:<{}} {:<{}} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f} {:<{}.{}f}\n",
           elements[params[m].ielement], mparam.iname,
           elements[params[m].jelement], mparam.jname,
-          elements[params[m].kelement], mparam.kname,
+          elements[params[m].kelement], mparam.jname,
           params[m].k,                  mparam.k,      mparam.deck,
           params[m].theta0,             mparam.theta0, mparam.dectheta0,
           params[m].rho,                mparam.rho,    mparam.decrho,
@@ -664,6 +664,7 @@ void PairTrunc3B::threebody(Param *param, double rsq_ij, double rsq_ik,
     double theta = acos(costheta);
     double sintheta = sqrt(1 - costheta * costheta);
     sintheta = sintheta < -1 ? -1 : (sintheta > 1 ? 1 : sintheta);
+    sintheta = sintheta == 0 ? TRIG_DELTA : sintheta;
 
     //Recuring parts
     double rho8 = pow(rho, 8);
